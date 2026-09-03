@@ -72,15 +72,32 @@ jobs:
           gem install cocoapods --no-document
           pod install --verbose 2>&1 | tail -20
 
-      # ── 7. Build with Xcode (unsigned — Sideloadly will re-sign) ─────────
+      # ── 8. Build with Xcode (unsigned — Sideloadly will re-sign) ─────────
       - name: Build iOS app with Xcode
         working-directory: ios
         run: |
           set -euo pipefail
 
+          # Auto-detect workspace and scheme names
+          WORKSPACE=$(find . -name "*.xcworkspace" -maxdepth 1 | head -1)
+          echo "Found workspace: $WORKSPACE"
+
+          if [ -z "$WORKSPACE" ]; then
+            echo "❌ No .xcworkspace found! Contents of ios/:"
+            ls -la
+            exit 1
+          fi
+
+          # Scheme name = workspace name without extension
+          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+          echo "Using scheme: $SCHEME"
+
+          # List available schemes for debugging
+          xcodebuild -workspace "$WORKSPACE" -list 2>/dev/null || true
+
           xcodebuild \
-            -workspace SecurityDashboard.xcworkspace \
-            -scheme SecurityDashboard \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
             -configuration Release \
             -sdk iphoneos \
             -arch arm64 \
