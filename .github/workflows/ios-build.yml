@@ -59,11 +59,6 @@ jobs:
 
           # Delete the entire line containing the keyword so we don't leave broken Ruby syntax behind
           sed -i '' '/privacy_file_aggregation_enabled/d' Podfile
-          
-          # Fix the Swift/Objective-C static library error by enabling modular headers globally
-          echo "use_modular_headers!" > Podfile.new
-          cat Podfile >> Podfile.new
-          mv Podfile.new Podfile
 
           echo "After patch:"
           head -n 5 Podfile
