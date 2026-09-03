@@ -1,26 +1,10 @@
 # .github/workflows/ios-build.yml
 # ─────────────────────────────────────────────────────────────────────────────
-# GitHub Actions: Build a downloadable .ipa using EAS cloud.
+# Build an unsigned .ipa using Xcode on GitHub's Mac runner.
+# No Expo account, no Apple Developer account, no tokens needed.
+# Download the IPA → drag into Sideloadly → install on iPhone.
 #
-# HOW IT WORKS:
-#   1. Triggers an iOS build on Expo's cloud servers (they handle certificates)
-#   2. Waits for the build to finish
-#   3. Downloads the .ipa from Expo
-#   4. Uploads it as a GitHub Actions artifact — download from the Actions tab
-#
-# REQUIRED GITHUB SECRET (only one needed!):
-#   EXPO_TOKEN → expo.dev → Account Settings → Access Tokens → Create
-#
-# FREE TIER:
-#   Expo gives you 30 free iOS cloud builds per month.
-#   No Apple Developer account required for internal/ad-hoc distribution.
-#
-# TRIGGER:
-#   - Push to `main`, OR
-#   - Manually: GitHub → Actions → "iOS IPA Build" → Run workflow
-#
-# DOWNLOAD YOUR IPA:
-#   Actions → completed run → Artifacts → SecurityDashboard-iOS.ipa
+# REQUIRED SECRETS: None!
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: iOS IPA Build
@@ -30,134 +14,108 @@ on:
     branches:
       - main
   workflow_dispatch:
-    inputs:
-      build_profile:
-        description: "EAS build profile (preview or production)"
-        required: false
-        default: "preview"
-        type: choice
-        options:
-          - preview
-          - production
 
 jobs:
   build-ios:
     name: Build iOS IPA
-    runs-on: ubuntu-latest   # ← Linux is fine — the actual compile happens on Expo's Mac
+    runs-on: macos-latest
 
     steps:
       # ── 1. Checkout ──────────────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ── 2. Node.js ───────────────────────────────────────────────────────
-      - name: Set up Node.js 22
+      # ── 2. Print toolchain versions ──────────────────────────────────────
+      - name: Print build environment
+        run: |
+          echo "Xcode: $(xcodebuild -version | head -1)"
+          echo "macOS: $(sw_vers -productVersion)"
+          echo "Ruby:  $(ruby --version)"
+
+      # ── 3. Node.js ───────────────────────────────────────────────────────
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: "npm"
 
-      # ── 3. Install dependencies ───────────────────────────────────────────
+      # ── 4. Install npm dependencies ──────────────────────────────────────
       - name: Install npm dependencies
         run: npm ci
 
-      # ── 4. Install EAS CLI ────────────────────────────────────────────────
-      - name: Install EAS CLI
-        run: npm install --global eas-cli@latest
+      # ── 5. Generate native iOS project from Expo ─────────────────────────
+      #    expo prebuild generates the ios/ folder with Xcode project files.
+      #    This is the "eject" step — turns your JS app into a native project.
+      - name: Generate native iOS project
+        run: npx expo prebuild --platform ios --no-install
 
-      # ── 5. Verify EXPO_TOKEN is set ───────────────────────────────────────
-      - name: Verify EXPO_TOKEN secret
+      # ── 6. Install CocoaPods dependencies ────────────────────────────────
+      - name: Install CocoaPods
+        working-directory: ios
+        run: pod install
+
+      # ── 7. Build with Xcode (unsigned — Sideloadly will re-sign) ─────────
+      - name: Build iOS app with Xcode
+        working-directory: ios
         run: |
-          if [ -z "$EXPO_TOKEN" ]; then
-            echo "❌ EXPO_TOKEN secret is missing!"
-            echo "   Go to: GitHub repo → Settings → Secrets → Actions → New secret"
-            echo "   Name: EXPO_TOKEN"
-            echo "   Value: get from expo.dev → Account Settings → Access Tokens"
+          set -euo pipefail
+
+          xcodebuild \
+            -workspace SecurityDashboard.xcworkspace \
+            -scheme SecurityDashboard \
+            -configuration Release \
+            -sdk iphoneos \
+            -arch arm64 \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            -derivedDataPath ./build \
+            clean build \
+            2>&1 | tee ../xcodebuild.log
+
+          echo ""
+          echo "✅ Xcode build finished"
+
+      # ── 8. Package .app into .ipa ────────────────────────────────────────
+      - name: Package IPA
+        run: |
+          set -euo pipefail
+
+          APP_PATH=$(find ios/build -name "*.app" -type d | head -1)
+
+          if [ -z "$APP_PATH" ]; then
+            echo "❌ No .app bundle found!"
+            find ios/build -type d -maxdepth 5
             exit 1
           fi
-          echo "✅ EXPO_TOKEN is set"
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
 
-      # ── 6. Authenticate ───────────────────────────────────────────────────
-      - name: Authenticate with Expo
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: |
-          eas whoami
-          echo "✅ Authenticated successfully"
+          echo "Found app: $APP_PATH"
 
-      # ── 7. Submit cloud build and wait for it to finish ───────────────────
-      #
-      # --wait            → blocks this job until the EAS build is 100% done
-      # --non-interactive → never pauses for prompts (required for CI)
-      # No --local flag   → Expo's Mac servers handle Xcode + certificates
-      #
-      - name: Trigger EAS cloud build and wait
-        id: eas_build
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: |
-          BUILD_PROFILE="${{ github.event.inputs.build_profile || 'preview' }}"
-          echo "🏗️  Starting EAS cloud build (profile: $BUILD_PROFILE)..."
-          echo "    This will take ~10-20 minutes on Expo's servers."
-          echo ""
-
-          # Run build, capture output to extract the build URL
-          eas build \
-            --platform ios \
-            --profile "$BUILD_PROFILE" \
-            --non-interactive \
-            --wait \
-            --json \
-            2>&1 | tee /tmp/eas-output.json
-
-          echo "✅ EAS cloud build finished"
-
-      # ── 8. Download the IPA from Expo ─────────────────────────────────────
-      - name: Download IPA from Expo
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: |
-          mkdir -p ./build
-
-          echo "📥 Downloading IPA from Expo servers..."
-
-          # Download the most recent successful iOS build
-          eas build:download \
-            --platform ios \
-            --output ./build/SecurityDashboard.ipa \
-            --non-interactive
+          mkdir -p Payload
+          cp -r "$APP_PATH" Payload/
+          zip -r SecurityDashboard.ipa Payload
+          rm -rf Payload
 
           echo ""
-          echo "✅ Download complete:"
-          ls -lh ./build/
+          echo "✅ IPA created:"
+          ls -lh SecurityDashboard.ipa
 
-      # ── 9. Upload IPA as GitHub Actions artifact ──────────────────────────
-      #
-      # After this step completes, go to:
-      # Actions → this run → scroll to bottom → Artifacts
-      # Click "SecurityDashboard-iOS" to download your .ipa
-      #
-      - name: Upload IPA as downloadable artifact
+      # ── 9. Upload IPA as downloadable artifact ───────────────────────────
+      - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: SecurityDashboard-iOS
-          path: ./build/SecurityDashboard.ipa
+          name: SecurityDashboard
+          path: SecurityDashboard.ipa
           retention-days: 30
           if-no-files-found: error
 
-      # ── 10. Print install instructions ────────────────────────────────────
-      - name: Print install instructions
-        run: |
-          echo ""
-          echo "╔══════════════════════════════════════════════════════╗"
-          echo "║           ✅ IPA BUILD COMPLETE                      ║"
-          echo "╠══════════════════════════════════════════════════════╣"
-          echo "║  Download: Actions → this run → Artifacts            ║"
-          echo "║                                                      ║"
-          echo "║  Install options:                                    ║"
-          echo "║  • AltStore (free, no Apple account needed)          ║"
-          echo "║  • Sideloadly (free)                                 ║"
-          echo "║  • TestFlight (needs Apple Developer $99/yr)         ║"
-          echo "╚══════════════════════════════════════════════════════╝"
+      # ── 10. Upload Xcode log on failure ──────────────────────────────────
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: xcodebuild.log
+          retention-days: 7
+          if-no-files-found: ignore
