@@ -14,17 +14,13 @@
     },
     "preview": {
       "distribution": "internal",
-      "credentialsSource": "local",
+      "credentialsSource": "remote",
       "ios": {
-        "simulator": false,
         "buildConfiguration": "Release"
-      },
-      "env": {
-        "APP_ENV": "preview"
       }
     },
     "production": {
-      "credentialsSource": "local",
+      "credentialsSource": "remote",
       "ios": {
         "buildConfiguration": "Release"
       }
