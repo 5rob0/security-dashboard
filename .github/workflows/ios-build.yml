@@ -69,8 +69,8 @@ jobs:
       - name: Install CocoaPods
         working-directory: ios
         run: |
-          gem install cocoapods --no-document
-          pod install --verbose 2>&1 | tail -20
+          set -euo pipefail
+          pod install
 
       # ── 8. Build with Xcode (unsigned — Sideloadly will re-sign) ─────────
       - name: Build iOS app with Xcode
