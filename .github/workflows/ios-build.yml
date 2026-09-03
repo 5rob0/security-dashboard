@@ -115,7 +115,17 @@ jobs:
           echo ""
           echo "✅ Xcode build finished"
 
-      # ── 8. Package .app into .ipa ────────────────────────────────────────
+      # ── 9. Print Xcode Error if it fails ─────────────────────────────────
+      - name: Print Xcode Error
+        if: failure()
+        run: |
+          echo "❌ XCODE BUILD FAILED!"
+          echo "Here are the last 150 lines of the log:"
+          echo "============================================================"
+          tail -n 150 xcodebuild.log
+          echo "============================================================"
+
+      # ── 10. Package .app into .ipa ────────────────────────────────────────
       - name: Package IPA
         run: |
           set -euo pipefail
