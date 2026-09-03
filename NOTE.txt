@@ -1,0 +1,3 @@
+--!strict
+-- Placeholder: This project is React Native / Expo (JavaScript/TypeScript).
+-- See src/ directory for all application source code.
