@@ -1,20 +1,19 @@
 # .github/workflows/ios-build.yml
 # ─────────────────────────────────────────────────────────────────────────────
-# GitHub Actions: Build iOS .ipa without a Mac.
+# GitHub Actions: Build iOS .ipa on GitHub's cloud Mac — no hardware needed.
 #
-# SETUP (one time):
-#   1. Go to https://expo.dev → create an account and project.
-#   2. Run `eas login` locally and create credentials.
-#   3. Add the following GitHub repository secrets:
-#      - EXPO_TOKEN  →  your EAS personal access token
-#                       (expo.dev → Account Settings → Access Tokens)
+# REQUIRED GITHUB SECRETS (repo → Settings → Secrets → Actions → New):
+#   EXPO_TOKEN          → expo.dev → Account → Access Tokens → Create
+#   APPLE_ID            → your Apple ID email (e.g. you@icloud.com)
+#   APPLE_TEAM_ID       → 10-char code from developer.apple.com → Membership
+#   APPLE_APP_SPECIFIC_PASSWORD  → appleid.apple.com → Sign-In & Security → App Passwords
 #
 # TRIGGER:
-#   - Push to `main` branch, OR
-#   - Manually via GitHub → Actions → "iOS IPA Build" → Run workflow
+#   - Push to `main`, OR
+#   - Manually: GitHub → Actions → "iOS IPA Build" → Run workflow
 #
 # OUTPUT:
-#   - Download the .ipa from Actions → your run → Artifacts section
+#   Actions → completed run → Artifacts → SecurityDashboard-iOS-<sha>
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: iOS IPA Build
@@ -23,63 +22,127 @@ on:
   push:
     branches:
       - main
-  workflow_dispatch:          # Allow manual trigger from GitHub UI
+  workflow_dispatch:
     inputs:
       build_profile:
-        description: "EAS build profile (preview or production)"
+        description: "EAS build profile"
         required: false
         default: "preview"
+        type: choice
+        options:
+          - preview
+          - production
 
 jobs:
   build-ios:
     name: Build iOS IPA
-    runs-on: macos-latest     # ← GitHub's cloud Mac — no hardware needed
+    runs-on: macos-latest
 
     steps:
-      # ── 1. Checkout repo ─────────────────────────────────────────────────
+      # ── 1. Checkout ──────────────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ── 2. Node.js ───────────────────────────────────────────────────────
-      - name: Set up Node.js
+      # ── 2. Xcode — select a stable version to avoid toolchain surprises ──
+      - name: Select Xcode version
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "15.4"
+
+      # ── 3. Node.js ───────────────────────────────────────────────────────
+      - name: Set up Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
 
-      # ── 3. Install dependencies ───────────────────────────────────────────
+      # ── 4. Install npm deps ───────────────────────────────────────────────
       - name: Install npm dependencies
         run: npm ci
 
-      # ── 4. Install EAS CLI ────────────────────────────────────────────────
-      - name: Install Expo EAS CLI
-        run: npm install --global eas-cli
+      # ── 5. Install EAS CLI ────────────────────────────────────────────────
+      - name: Install EAS CLI
+        run: npm install --global eas-cli@latest
 
-      # ── 5. Authenticate with Expo ─────────────────────────────────────────
+      # ── 6. Verify EXPO_TOKEN is present before we waste 5 min building ───
+      - name: Verify secrets are configured
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "❌ ERROR: EXPO_TOKEN secret is not set."
+            echo "   Go to: GitHub repo → Settings → Secrets → Actions → New secret"
+            echo "   Get token from: expo.dev → Account Settings → Access Tokens"
+            exit 1
+          fi
+          echo "✅ EXPO_TOKEN is present"
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      # ── 7. Authenticate with Expo ─────────────────────────────────────────
       - name: Authenticate with Expo
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: eas whoami
+        run: |
+          eas whoami
+          echo "✅ EAS authentication successful"
 
-      # ── 6. Build the .ipa (local build — no Expo cloud build minutes used) ─
+      # ── 8. Create build output directory ─────────────────────────────────
+      - name: Create build output dir
+        run: mkdir -p ./build
+
+      # ── 9. Run EAS local build ────────────────────────────────────────────
+      #
+      #  Key flags explained:
+      #    --local            → Runs Xcode on THIS runner (no cloud minutes)
+      #    --non-interactive  → Never pauses to ask questions (CI-safe)
+      #    --output           → Where to put the .ipa when done
+      #
       - name: Build iOS IPA (local)
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          # Apple credentials — needed for code signing the IPA
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
         run: |
+          set -euo pipefail   # Exit immediately on any error, print full trace
+
           BUILD_PROFILE="${{ github.event.inputs.build_profile || 'preview' }}"
-          echo "Building with EAS profile: $BUILD_PROFILE"
+          echo "🏗️  Starting EAS local build..."
+          echo "    Profile : $BUILD_PROFILE"
+          echo "    Platform: iOS"
+          echo "    Xcode   : $(xcodebuild -version | head -1)"
+          echo "    Node    : $(node --version)"
+          echo "    EAS CLI : $(eas --version)"
+          echo ""
+
           eas build \
             --platform ios \
             --profile "$BUILD_PROFILE" \
             --local \
             --non-interactive \
-            --output ./build/app.ipa
+            --output ./build/app.ipa \
+            2>&1 | tee ./build/eas-build.log
 
-      # ── 7. Upload .ipa as downloadable GitHub artifact ────────────────────
+          echo ""
+          echo "✅ Build completed. Checking output..."
+          ls -lh ./build/
+
+      # ── 10. Upload IPA (always runs so logs upload even on failure) ───────
       - name: Upload IPA artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: SecurityDashboard-iOS-${{ github.sha }}
           path: ./build/app.ipa
-          retention-days: 30      # Keep artifact for 30 days
+          retention-days: 30
           if-no-files-found: error
+
+      # ── 11. Upload build log on failure for debugging ─────────────────────
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eas-build-log-${{ github.sha }}
+          path: ./build/eas-build.log
+          retention-days: 7
+          if-no-files-found: ignore

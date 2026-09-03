@@ -3,25 +3,15 @@
     "name": "SecurityDashboard",
     "slug": "security-dashboard",
     "version": "1.0.0",
-    "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "dark",
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0a0a0a"
+    "runtimeVersion": {
+      "policy": "appVersion"
     },
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.yourname.securitydashboard",
+      "bundleIdentifier": "com.security.dashboard",
       "buildNumber": "1"
-    },
-    "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#0a0a0a"
-      },
-      "package": "com.yourname.securitydashboard"
     },
     "plugins": [
       "expo-router",
