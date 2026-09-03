@@ -49,10 +49,28 @@ jobs:
       - name: Generate native iOS project
         run: npx expo prebuild --platform ios --no-install
 
-      # ── 6. Install CocoaPods dependencies ────────────────────────────────
+      # ── 6. Patch Podfile for compatibility ─────────────────────────────────
+      #    expo prebuild generates a keyword the runner's CocoaPods doesn't know.
+      - name: Patch generated Podfile
+        working-directory: ios
+        run: |
+          echo "Before patch:"
+          grep -n "privacy_file_aggregation_enabled" Podfile || echo "(keyword not found, no patch needed)"
+
+          sed -i '' 's/,:privacy_file_aggregation_enabled//g' Podfile
+          sed -i '' 's/, :privacy_file_aggregation_enabled => [a-z]*//g' Podfile
+          sed -i '' 's/:privacy_file_aggregation_enabled => [a-z]*,//g' Podfile
+          sed -i '' 's/:privacy_file_aggregation_enabled//g' Podfile
+
+          echo "After patch:"
+          grep -n "privacy_file_aggregation" Podfile || echo "✅ Keyword removed successfully"
+
+      # ── 7. Install CocoaPods dependencies ────────────────────────────────
       - name: Install CocoaPods
         working-directory: ios
-        run: pod install
+        run: |
+          gem install cocoapods --no-document
+          pod install --verbose 2>&1 | tail -20
 
       # ── 7. Build with Xcode (unsigned — Sideloadly will re-sign) ─────────
       - name: Build iOS app with Xcode
