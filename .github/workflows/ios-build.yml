@@ -57,10 +57,8 @@ jobs:
           echo "Before patch:"
           grep -n "privacy_file_aggregation_enabled" Podfile || echo "(keyword not found, no patch needed)"
 
-          sed -i '' 's/,:privacy_file_aggregation_enabled//g' Podfile
-          sed -i '' 's/, :privacy_file_aggregation_enabled => [a-z]*//g' Podfile
-          sed -i '' 's/:privacy_file_aggregation_enabled => [a-z]*,//g' Podfile
-          sed -i '' 's/:privacy_file_aggregation_enabled//g' Podfile
+          # Delete the entire line containing the keyword so we don't leave broken Ruby syntax behind
+          sed -i '' '/privacy_file_aggregation_enabled/d' Podfile
 
           echo "After patch:"
           grep -n "privacy_file_aggregation" Podfile || echo "✅ Keyword removed successfully"
